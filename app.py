@@ -5,6 +5,7 @@
 # - (Excel) vali sheet, vaikimisi päiserida = 3
 # - Kuva ainult kuni veeruni "Pak+näidis" (kui selline veerg eksisteerib)
 # - Kuva tabelit Exceli-laadselt (AgGrid kui saadaval) või tavalise tabelina
+# - All: katelde planeerimise tabel numbrilises järjekorras (1102 → 1137)
 # --------------------------------------------------------------
 
 from __future__ import annotations
@@ -47,13 +48,10 @@ def read_with_header(uploaded, sheet: str, header_row_index: int) -> pd.DataFram
     )
     return df
 
-# Abiplokk: piirame veerud kuni "Pak+näidis" ja eemaldame tühjad read
-
 def _trim_to_pak_naidis(df: pd.DataFrame) -> pd.DataFrame:
     if "Pak+näidis" in df.columns:
         col_idx = df.columns.get_loc("Pak+näidis") + 1
         df = df.iloc[:, :col_idx]
-    # Eemalda täiesti tühjad read (kui päise järel on tühi saba)
     df = df.dropna(how="all")
     return df
 
@@ -67,10 +65,6 @@ with st.sidebar:
         type=["xlsx", "xlsm", "csv"],
         accept_multiple_files=False,
     )
-    if HAS_AGGRID:
-        st.caption("Grid: st-aggrid on aktiivne.")
-    else:
-        st.caption("(Valikuline) `pip install streamlit-aggrid` annab Exceli-laadse vaate.")
 
 if uploaded is None:
     st.info("⬅️ Laadi vasakult fail.")
@@ -86,7 +80,6 @@ if uploaded.name.lower().endswith(".csv"):
     df.columns = df.columns.astype(str).str.strip()
     df = _trim_to_pak_naidis(df)
 else:
-    # Excel
     sheets = _list_sheets(uploaded)
     st.subheader("Sheet ja päis")
     sheet_name = st.selectbox("Vali sheet", options=sheets, index=0)
@@ -130,3 +123,62 @@ st.download_button(
 )
 
 st.caption("Kuvatakse kuni veeruni 'Pak+näidis' (kui olemas) ja tühjad read eemaldatakse.")
+
+# ------------------------------
+# Katelde planeerimine — fikseeritud mahutuvused (näidised)
+# ------------------------------
+st.header("Katelde mahutuvused")
+
+BOILERS = [
+    1102, 1105, 1110, 1111, 1113, 1114, 1115, 1116, 1117, 1118,
+    1119, 1120, 1121, 1122, 1123, 1124, 1125, 1126, 1127, 1128,
+    1129, 1131, 1132, 1137
+]
+
+# Pildi põhjal sisestatud vahemikud (kg). Muuda julgelt vastavalt tegelikule tabelile.
+BOILER_CAPACITY = {
+    1102: (175, 300),
+    1105: (3.5, 10),
+    1110: (98, 150),
+    1111: (50, 70),
+    1113: (340, 800),
+    1114: (6, 29),
+    1115: (6, 15),
+    1116: (3, 7),
+    1117: (6, 14),
+    1118: (650, 1050),
+    1119: (650, 1050),
+    1120: (700, 1250),
+    1121: (700, 1250),
+    1122: (350, 600),
+    1123: (30, 66),
+    1124: (60, 140),
+    1125: (175, 300),
+    1126: (1300, 2100),
+    1127: (66, 110),
+    1128: (150, 220),
+    1129: (350, 600),
+    1131: (98, 150),
+    1132: (50, 75),
+    1137: (7, 35),
+}
+
+cap_df = (
+    pd.DataFrame([
+        {"Katla nr": b, "Minimaalne mahutuvus (kg)": BOILER_CAPACITY[b][0], "Maksimaalne mahutuvus (kg)": BOILER_CAPACITY[b][1]}
+        for b in sorted(BOILERS)
+    ])
+)
+
+st.dataframe(
+    cap_df,
+    use_container_width=False,
+    hide_index=True,
+    column_config={
+        "Katla nr": st.column_config.NumberColumn(width="small"),
+        "Mahutuvus min": st.column_config.NumberColumn(width="medium"),
+        "Mahutuvus max": st.column_config.NumberColumn(width="medium"),
+    },
+)
+
+st.caption("Vahemikud võetud sinu jagatud pildilt; kontrolli üle ja muuda koodis BOILER_CAPACITY sõnastikus, kui mõni number vajab täpsustamist (nt koma vs punkt).")
