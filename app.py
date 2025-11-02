@@ -65,6 +65,10 @@ with st.sidebar:
         type=["xlsx", "xlsm", "csv"],
         accept_multiple_files=False,
     )
+    if HAS_AGGRID:
+        st.caption("Grid: st-aggrid on aktiivne.")
+    else:
+        st.caption("(Valikuline) `pip install streamlit-aggrid` annab Exceli-laadse vaate.")
 
 if uploaded is None:
     st.info("⬅️ Laadi vasakult fail.")
@@ -127,7 +131,7 @@ st.caption("Kuvatakse kuni veeruni 'Pak+näidis' (kui olemas) ja tühjad read ee
 # ------------------------------
 # Katelde planeerimine — fikseeritud mahutuvused (näidised)
 # ------------------------------
-st.header("Katelde mahutuvused")
+st.header("5) Katelde mahutuvused — fikseeritud")
 
 BOILERS = [
     1102, 1105, 1110, 1111, 1113, 1114, 1115, 1116, 1117, 1118,
@@ -165,20 +169,70 @@ BOILER_CAPACITY = {
 
 cap_df = (
     pd.DataFrame([
-        {"Katla nr": b, "Minimaalne mahutuvus (kg)": BOILER_CAPACITY[b][0], "Maksimaalne mahutuvus (kg)": BOILER_CAPACITY[b][1]}
+        {"Katla nr": b, "Mahutuvus min": BOILER_CAPACITY[b][0], "Mahutuvus max": BOILER_CAPACITY[b][1]}
         for b in sorted(BOILERS)
     ])
 )
 
-st.dataframe(
-    cap_df,
-    use_container_width=False,
-    hide_index=True,
-    column_config={
-        "Katla nr": st.column_config.NumberColumn(width="small"),
-        "Mahutuvus min": st.column_config.NumberColumn(width="medium"),
-        "Mahutuvus max": st.column_config.NumberColumn(width="medium"),
-    },
-)
+st.dataframe(cap_df, use_container_width=True, hide_index=True)
 
 st.caption("Vahemikud võetud sinu jagatud pildilt; kontrolli üle ja muuda koodis BOILER_CAPACITY sõnastikus, kui mõni number vajab täpsustamist (nt koma vs punkt).")
+
+# ------------------------------
+# Tellimused katla järgi (klikitav menüü)
+# ------------------------------
+st.subheader("6) Tellimused katla järgi")
+
+# Abi: leia veerud "Värvim. tellim. nr" ja "Kg" automaatselt
+import re
+
+def _norm(s: str) -> str:
+    s = s.lower()
+    s = s.replace("ä", "a").replace("ö", "o").replace("õ", "o").replace("ü", "u")
+    return re.sub(r"[^a-z0-9]+", "", s)
+
+ORDER_COL = None
+KG_COL = None
+for c in df.columns:
+    sc = _norm(str(c))
+    if ORDER_COL is None and ("varvim" in sc and "tellim" in sc):
+        ORDER_COL = c
+    if KG_COL is None and (sc == "kg" or sc.endswith("kg")):
+        KG_COL = c
+
+if ORDER_COL is None or KG_COL is None:
+    st.warning("Ei leidnud veerge ‘Värvim. tellim. nr’ või ‘Kg’. Palun kontrolli päiserida/veerunimesid.")
+else:
+    st.caption(f"Kasutatakse veerge: **{ORDER_COL}** (tellimus) ja **{KG_COL}** (kg).")
+
+    # Nupud kateldele (6 tükki reas)
+    if "selected_boiler" not in st.session_state:
+        st.session_state.selected_boiler = None
+
+    rows = 6
+    for i in range(0, len(BOILERS), rows):
+        cols = st.columns(rows)
+        for j, b in enumerate(BOILERS[i:i+rows]):
+            if cols[j].button(str(b), key=f"boilbtn_{b}"):
+                st.session_state.selected_boiler = b
+
+    sel = st.session_state.selected_boiler
+    if sel is None:
+        st.info("Vali ülevalt katel, et näha sinna sobivaid tellimusi.")
+    else:
+        bmin, bmax = BOILER_CAPACITY[sel]
+        # Filtreeri sobivad tellimused vahemiku järgi
+        work = df.copy()
+        work["_kg"] = pd.to_numeric(work[KG_COL], errors="coerce")
+        work = work.dropna(subset=["_kg"]) 
+        eligible = work[ (work["_kg"] >= bmin) & (work["_kg"] <= bmax) ]
+        # Võta välja ainult tellimuse nr ja kg
+        out = eligible[[ORDER_COL, "_kg"]].rename(columns={ORDER_COL: "Värvim. tellim. nr", "_kg": "Kg"})
+        out["Värvim. tellim. nr"] = out["Värvim. tellim. nr"].astype(str)
+
+        st.markdown(f"**Katel {sel}** — vahemik {bmin}–{bmax} kg")
+        st.write(f"Leitud tellimusi: **{len(out)}**, kogusumma: **{int(out['Kg'].sum()) if len(out)>0 else 0} kg**")
+        if out.empty:
+            st.info("Selles vahemikus ühtegi tellimust ei leitud.")
+        else:
+            st.dataframe(out.sort_values(by=["Kg"], ascending=False), use_container_width=False, hide_index=True)
